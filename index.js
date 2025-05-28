@@ -45,7 +45,7 @@ io.on('connection', (socket) => {
     // Enviar estado inicial
     socket.emit('whatsapp-status', {
         isReady: isWhatsAppReady,
-        qrCode: qrCodeUrl
+        qrCodeUrl: qrCodeUrl
     });
 
     // Enviar datos iniciales del Excel
@@ -113,7 +113,7 @@ client.on('qr', (qr) => {
     // Emitir QR a todos los clientes conectados
     io.emit('whatsapp-status', {
         isReady: false,
-        qrCodeUrl: qr  // Cambiado a qrCodeUrl para coincidir con el frontend
+        qrCodeUrl: qrCodeUrl
     });
 });
 
@@ -126,7 +126,7 @@ client.on('ready', async () => {
         // Emitir estado a todos los clientes conectados
         io.emit('whatsapp-status', {
             isReady: true,
-            qrCode: null
+            qrCodeUrl: null
         });
 
         await whatsappService.setClient(client);
@@ -151,7 +151,7 @@ client.on('auth_failure', (error) => {
     // Emitir estado a todos los clientes conectados
     io.emit('whatsapp-status', {
         isReady: false,
-        qrCode: null
+        qrCodeUrl: null
     });
 });
 
@@ -163,7 +163,7 @@ client.on('disconnected', (reason) => {
     // Emitir estado a todos los clientes conectados
     io.emit('whatsapp-status', {
         isReady: false,
-        qrCode: null
+        qrCodeUrl: null
     });
 });
 
