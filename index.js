@@ -102,7 +102,6 @@ client.on('qr', (qr) => {
     
     logger.info('[WhatsApp] New QR Code generated');
     
-    // Generar QR de manera síncrona
     try {
         qrcode.generate(qr, { small: true });
         logger.info('[WhatsApp] QR Code generated successfully in console');
@@ -110,10 +109,9 @@ client.on('qr', (qr) => {
         logger.error('[WhatsApp] Error generating QR in console:', error);
     }
     
-    // Emitir QR a todos los clientes conectados
     io.emit('whatsapp-status', {
         isReady: false,
-        qrCodeUrl: qrCodeUrl
+        qrCodeUrl: `data:image/png;base64,${Buffer.from(qrCodeUrl).toString('base64')}`
     });
 });
 

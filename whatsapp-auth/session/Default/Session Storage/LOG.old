@@ -1,3 +1,4 @@
-2025/05/28-15:56:39.789 498c Reusing MANIFEST C:\Users\USUARIO\Desktop\connection_chat_bot_actual_to_whatsapp\whatsapp-auth\session\Default\Session Storage/MANIFEST-000001
-2025/05/28-15:56:39.791 498c Recovering log #3
-2025/05/28-15:56:39.792 498c Reusing old log C:\Users\USUARIO\Desktop\connection_chat_bot_actual_to_whatsapp\whatsapp-auth\session\Default\Session Storage/000003.log 
+2025/05/28-16:35:35.362 5014 Creating DB C:\Users\USUARIO\Desktop\connection_chat_bot_actual_to_whatsapp\whatsapp-auth\session\Default\Session Storage since it was missing.
+2025/05/28-16:35:35.386 5014 Reusing MANIFEST C:\Users\USUARIO\Desktop\connection_chat_bot_actual_to_whatsapp\whatsapp-auth\session\Default\Session Storage/MANIFEST-000001
+2025/05/28-16:35:35.386 5014 Recovering log #3
+2025/05/28-16:35:35.387 5014 Reusing old log C:\Users\USUARIO\Desktop\connection_chat_bot_actual_to_whatsapp\whatsapp-auth\session\Default\Session Storage/000003.log 
