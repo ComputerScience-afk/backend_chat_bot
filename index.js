@@ -101,18 +101,23 @@ client.on('qr', (qr) => {
     isWhatsAppReady = false;
     
     logger.info('[WhatsApp] New QR Code generated');
+    logger.info('[WhatsApp] Original QR string:', qr);
     
     try {
         qrcode.generate(qrCodeUrl, { small: true });
         logger.info('[WhatsApp] QR Code generated successfully in console');
+        
+        logger.info('[WhatsApp] Base64 QR for frontend:', qrCodeUrl);
+        
+        // Emitir QR a todos los clientes conectados
+        io.emit('whatsapp-status', {
+            isReady: false,
+            qrCodeUrl: qrCodeUrl
+        });
+        
     } catch (error) {
         logger.error('[WhatsApp] Error generating QR in console:', error);
     }
-    
-    io.emit('whatsapp-status', {
-        isReady: false,
-        qrCodeUrl: `data:image/png;base64,${Buffer.from(qr).toString('base64')}` // Formato correcto para qrcode.react
-    });
 });
 
 client.on('ready', async () => {
