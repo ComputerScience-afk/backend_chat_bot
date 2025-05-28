@@ -1,4 +1,0 @@
-2025/05/28-14:16:13.769 5e2c Reusing MANIFEST C:\Users\USUARIO\Documents\chatbot-IA\connection_chat_bot_actual_to_whatsapp\.wwebjs_auth\session-whatsapp-bot\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
-2025/05/28-14:16:13.770 5e2c Recovering log #563
-2025/05/28-14:16:13.774 5e2c Reusing old log C:\Users\USUARIO\Documents\chatbot-IA\connection_chat_bot_actual_to_whatsapp\.wwebjs_auth\session-whatsapp-bot\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000563.log 
-2025/05/28-14:16:16.206 5a88 Manual compaction at level-0 from '\x00\xb7\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\xb8\x00\x00\x00' @ 0 : 0; will stop at (end)
