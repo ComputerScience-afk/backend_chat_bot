@@ -73,10 +73,26 @@ setInterval(() => {
 
 // Configuración del cliente WhatsApp
 const client = new Client({
-    authStrategy: new LocalAuth(),
+    authStrategy: new LocalAuth({
+        dataPath: './whatsapp-auth'  // Directorio específico para auth
+    }),
     puppeteer: {
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        headless: true,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu'
+        ]
     }
+});
+
+// Manejo de errores global para el cliente
+client.on('error', error => {
+    logger.error('[WhatsApp] Client error:', error);
 });
 
 // Eventos del cliente WhatsApp
@@ -84,26 +100,20 @@ client.on('qr', (qr) => {
     qrCodeUrl = qr;
     isWhatsAppReady = false;
     
-    // Forzar limpieza de consola
-    process.stdout.write('\x1Bc');
-    
-    console.log('\n==================================================');
-    console.log('🔄 NUEVO CÓDIGO QR GENERADO - ESCANEA CON WHATSAPP');
-    console.log('==================================================\n');
+    logger.info('[WhatsApp] New QR Code generated');
     
     // Generar QR de manera síncrona
     try {
         qrcode.generate(qr, { small: true });
-        logger.info('Código QR generado exitosamente');
+        logger.info('[WhatsApp] QR Code generated successfully in console');
     } catch (error) {
-        logger.error('Error al generar QR:', error);
-        console.log('QR Code:', qr);
+        logger.error('[WhatsApp] Error generating QR in console:', error);
     }
     
     // Emitir QR a todos los clientes conectados
     io.emit('whatsapp-status', {
         isReady: false,
-        qrCode: qr
+        qrCodeUrl: qr  // Cambiado a qrCodeUrl para coincidir con el frontend
     });
 });
 
@@ -350,7 +360,17 @@ process.on('unhandledRejection', (reason, promise) => {
     logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
-// Manejo de señales de terminación
+// Inicializar el cliente de WhatsApp
+logger.info('[WhatsApp] Initializing client...');
+client.initialize()
+    .then(() => {
+        logger.info('[WhatsApp] Client initialization started successfully');
+    })
+    .catch(error => {
+        logger.error('[WhatsApp] Failed to initialize client:', error);
+    });
+
+// Manejar señales de terminación
 process.on('SIGTERM', async () => {
     logger.info('SIGTERM received. Shutting down gracefully...');
     await cleanup();
@@ -363,10 +383,12 @@ process.on('SIGINT', async () => {
     process.exit(0);
 });
 
+// Función de limpieza mejorada
 async function cleanup() {
     try {
-        if (whatsappService) {
-            await whatsappService.destroy();
+        if (client) {
+            await client.destroy();
+            logger.info('[WhatsApp] Client destroyed successfully');
         }
         logger.info('Cleanup completed successfully');
     } catch (error) {
@@ -374,7 +396,7 @@ async function cleanup() {
     }
 }
 
-// Iniciar el servidor y el bot
+// Iniciar el servidor
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     logger.info(`Server running on port ${PORT}`);
