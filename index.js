@@ -103,7 +103,7 @@ client.on('qr', (qr) => {
     logger.info('[WhatsApp] New QR Code generated');
     
     try {
-        qrcode.generate(qr, { small: true });
+        qrcode.generate(qrCodeUrl, { small: true });
         logger.info('[WhatsApp] QR Code generated successfully in console');
     } catch (error) {
         logger.error('[WhatsApp] Error generating QR in console:', error);
