@@ -3,10 +3,10 @@ const OpenAIService = require('../infrastructure/openai/openaiService');
 const cloudinaryService = require('../infrastructure/cloudinary/cloudinaryService');
 const { logger } = require('../utils/logger');
 const { ConversationStateService, CONVERSATION_STATES } = require('./services/ConversationStateService');
-const UserTrackingService = require('./services/UserTrackingService');
 const path = require('path');
 const fs = require('fs');
 const { setInterval } = require('timers');
+const LeadTrackingService = require('./services/LeadTrackingService');
 
 class MessageHandler {
     constructor(client) {
@@ -15,8 +15,8 @@ class MessageHandler {
         }
         this.client = client;
         this.conversationState = new ConversationStateService();
-        this.userTrackingService = new UserTrackingService();
         this.openaiService = new OpenAIService();
+        this.leadTrackingService = new LeadTrackingService(null, null);
         this.initialized = false;
         
         // Límites para archivos
@@ -86,7 +86,6 @@ class MessageHandler {
         if (this.initialized) return;
 
         try {
-            await this.userTrackingService.init();
             this.initialized = true;
             logger.info('MessageHandler initialized successfully');
         } catch (error) {
@@ -153,18 +152,18 @@ class MessageHandler {
                 const isFirstTimeUser = this.conversationState.isFirstTimeUser(userId);
                 const hasEverBeenGreeted = this.conversationState.hasEverBeenGreeted(userId);
                 
-                // Si es la primera vez que el usuario escribe, guardar en Excel inmediatamente
+                // Si es la primera vez que el usuario escribe, registrar en la base de datos
                 if (isFirstTimeUser) {
                     try {
                         const leadData = {
-                            phone: message.from.replace('@c.us', ''),
-                            name: message._data?.notifyName || message._data?.pushname || 'No proporcionado',
-                            location: 'No proporcionada',
-                            symptoms: [],
-                            source: 'WhatsApp',
-                            campaignId: message._data?.ad_id || 'N/A'
+                            telefono: message.from.replace('@c.us', ''),
+                            nombre: message._data?.notifyName || message._data?.pushname || 'No proporcionado',
+                            ubicacion: 'No proporcionada',
+                            sintomas: '',  // Inicializar como string vacío
+                            origen: 'WhatsApp',
+                            id_campana: message._data?.ad_id || 'N/A'
                         };
-                        await this.userTrackingService.trackUser(leadData);
+                        await this.leadTrackingService.createOrUpdateLead(leadData);
                     } catch (error) {
                         logger.error('Error tracking first-time user:', error);
                         // Continuar con el proceso aunque falle el tracking
@@ -347,10 +346,7 @@ class MessageHandler {
                 const result = {
                     name: extracted.name || currentState.data.name || null,
                     location: extracted.location || currentState.data.location || null,
-                    symptoms: [
-                        ...(currentState.data.symptoms || []),
-                        ...(extracted.symptoms || [])
-                    ],
+                    symptoms: extracted.symptoms || [],
                     objection_type: extracted.objection_type || null,
                     objection_detected: extracted.objection_detected || false,
                     free_consultation_response: extracted.free_consultation_response || null,
@@ -428,15 +424,15 @@ class MessageHandler {
         try {
             const contact = await message.getContact();
             const leadData = {
-                phone: message.from.replace('@c.us', ''),
-                name: extractedData.name || contact.pushname || contact.name || 'No proporcionado',
-                location: extractedData.location || 'No proporcionada',
-                symptoms: extractedData.symptoms || [],
-                source: 'WhatsApp',
-                campaignId: message._data?.ad_id || 'N/A'
+                telefono: message.from.replace('@c.us', ''),
+                nombre: extractedData.name || contact.pushname || contact.name || 'No proporcionado',
+                ubicacion: extractedData.location || 'No proporcionada',
+                sintomas: Array.isArray(extractedData.symptoms) ? extractedData.symptoms.join(', ') : (extractedData.symptoms || ''),
+                origen: 'WhatsApp',
+                id_campana: message._data?.ad_id || 'N/A'
             };
 
-            await this.userTrackingService.trackUser(leadData);
+            await this.leadTrackingService.createOrUpdateLead(leadData);
             logger.info('Lead processed successfully:', leadData);
             
             return true;
@@ -458,7 +454,7 @@ class MessageHandler {
                 originalMessage: message.body || ''
             };
 
-            await this.userTrackingService.trackObjection(objectionData);
+            await this.leadTrackingService.trackObjection(objectionData);
             logger.info('Objection tracked successfully:', objectionData);
             
             return true;
@@ -480,7 +476,7 @@ class MessageHandler {
                 response: extractedData.free_consultation_response || null
             };
 
-            await this.userTrackingService.trackFreeConsultation(freeConsultationData);
+            await this.leadTrackingService.trackFreeConsultation(freeConsultationData);
             logger.info('Free consultation tracked successfully:', freeConsultationData);
             
             return true;
@@ -543,6 +539,62 @@ class MessageHandler {
                 "❌ Error procesando el comando. Por favor, intenta nuevamente."
             );
         }
+    }
+
+    async handleMessage(message) {
+        try {
+            const { from, body } = message;
+            
+            // Extraer el número de teléfono sin el @c.us
+            const telefono = from.replace('@c.us', '');
+
+            // Crear o actualizar el lead
+            await this.leadTrackingService.createOrUpdateLead({
+                telefono,
+                ultima_interaccion: new Date()
+            });
+
+            // Procesar el mensaje según su contenido
+            if (body.toLowerCase().includes('ayuda')) {
+                await this.handleHelpRequest(message);
+            } else if (body.toLowerCase().includes('desactivar')) {
+                await this.handleBotToggle(message);
+            } else {
+                await this.handleNormalMessage(message);
+            }
+
+            // Actualizar última consulta
+            await this.leadTrackingService.updateLastConsulta(telefono);
+
+        } catch (error) {
+            logger.error('Error handling message:', error);
+            throw error;
+        }
+    }
+
+    async handleHelpRequest(message) {
+        const response = `¡Hola! Estos son los comandos disponibles:
+- ayuda: Muestra este mensaje
+- desactivar: Desactiva el bot
+- activar: Activa el bot`;
+        
+        await this.client.sendMessage(message.from, response);
+    }
+
+    async handleBotToggle(message) {
+        const telefono = message.from.replace('@c.us', '');
+        const newStatus = await this.leadTrackingService.toggleBotStatus(telefono);
+        
+        const response = newStatus 
+            ? '✅ Bot activado correctamente'
+            : '❌ Bot desactivado correctamente';
+        
+        await this.client.sendMessage(message.from, response);
+    }
+
+    async handleNormalMessage(message) {
+        // Aquí puedes agregar la lógica para mensajes normales
+        // Por ejemplo, integración con GPT u otras funcionalidades
     }
 }
 

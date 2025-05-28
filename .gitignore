@@ -29,3 +29,6 @@ coverage/
 # Build
 dist/
 build/ 
+
+whatsapp-auth/
+.wwwebjs_cache/

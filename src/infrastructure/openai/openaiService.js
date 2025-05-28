@@ -2,6 +2,7 @@ const { OpenAI } = require('openai');
 const { logger } = require('../../utils/logger');
 const fs = require('fs');
 const path = require('path');
+const { formatPeruDate, getCurrentPeruDate } = require('../../utils/dateUtils');
 
 class OpenAIService {
     constructor() {
@@ -31,52 +32,44 @@ class OpenAIService {
             }
 
             const rawPrompt = fs.readFileSync(promptPath, 'utf8');
-            
-            // Inject current date and time information for Peru
-            const now = new Date();
-            const peruTime = new Intl.DateTimeFormat('es-PE', {
-                timeZone: 'America/Lima',
-                dateStyle: 'full',
-                timeStyle: 'long'
-            }).format(now);
-            
-            this.systemPrompt = this.injectDateInformation(rawPrompt, peruTime);
-            logger.info('System prompt loaded successfully with current date');
+            this.basePrompt = rawPrompt;
+            logger.info('Base prompt loaded successfully');
         } catch (error) {
             logger.error('Error loading prompt:', error);
-            // Usar un prompt por defecto en caso de error
-            this.systemPrompt = this.getDefaultPrompt();
+            this.basePrompt = this.getDefaultPrompt();
         }
     }
 
     getDefaultPrompt() {
         return `Eres Antonio, un asistente médico virtual del Centro Médico INSALUD.
-Tu objetivo es ayudar a los pacientes a programar citas y responder consultas médicas básicas.
-Fecha actual en Perú: ${new Intl.DateTimeFormat('es-PE', { timeZone: 'America/Lima' }).format(new Date())}`;
+Tu objetivo es ayudar a los pacientes a programar citas y responder consultas médicas básicas.`;
+    }
+
+    getCurrentPrompt() {
+        const currentDateTime = formatPeruDate(getCurrentPeruDate());
+        return this.injectDateInformation(this.basePrompt, currentDateTime);
     }
 
     injectDateInformation(prompt, currentDateTime) {
         try {
-            // Find the "Reglas sobre fechas" section and inject the current date
-            const dateSection = "Reglas sobre fechas";
-            const dateSectionIndex = prompt.indexOf(dateSection);
-            
-            if (dateSectionIndex === -1) {
-                // If section not found, append at the end
-                return prompt + `\n\nFecha y hora actual en Perú:\n${currentDateTime}\n`;
+            // Asegurarnos de que la información de fecha esté al principio del prompt
+            const dateInfo = `[INFORMACIÓN ACTUAL]
+- Fecha y hora actual en Perú: ${currentDateTime}
+- Zona horaria: America/Lima
+- Horario de atención: Lunes a Domingo de 8am a 8pm
+
+`;
+            // Si ya existe una sección de fecha, la reemplazamos
+            const existingDateSection = prompt.match(/\[INFORMACIÓN ACTUAL\][\s\S]*?\n\n/);
+            if (existingDateSection) {
+                return prompt.replace(existingDateSection[0], dateInfo);
             }
-
-            // Find the end of the date rules section
-            const nextSectionIndex = prompt.indexOf('\n\n', dateSectionIndex + dateSection.length);
-            const insertPosition = nextSectionIndex === -1 ? prompt.length : nextSectionIndex;
-
-            // Insert the current date information
-            return prompt.slice(0, insertPosition) + 
-                   `\nFecha y hora actual en Perú: ${currentDateTime}\n` +
-                   prompt.slice(insertPosition);
+            
+            // Si no existe, la agregamos al principio
+            return dateInfo + prompt;
         } catch (error) {
             logger.error('Error injecting date information:', error);
-            return prompt + `\n\nFecha y hora actual en Perú:\n${currentDateTime}\n`;
+            return dateInfo + prompt;
         }
     }
 
@@ -87,10 +80,13 @@ Fecha actual en Perú: ${new Intl.DateTimeFormat('es-PE', { timeZone: 'America/L
             try {
                 const messages = [];
                 
-                // Agregar sistema de mensajes
+                // Obtener el prompt actualizado con la fecha actual
+                const currentPrompt = this.getCurrentPrompt();
+                
+                // Agregar el prompt del sistema con la fecha actualizada
                 messages.push({
                     role: 'system',
-                    content: 'Eres un asistente médico profesional y empático que ayuda a los pacientes de INSALUD.'
+                    content: currentPrompt
                 });
 
                 if (imageBase64) {
@@ -128,21 +124,17 @@ Fecha actual en Perú: ${new Intl.DateTimeFormat('es-PE', { timeZone: 'America/L
                 attempts++;
                 logger.error(`OpenAI API error (attempt ${attempts}/${this.retryAttempts}):`, error);
 
-                // Manejar errores específicos
                 if (error.status === 429) {
-                    // Rate limit - esperar más tiempo
                     await new Promise(resolve => setTimeout(resolve, this.retryDelay * 2));
                     continue;
                 }
 
                 if (error.status === 500 || error.status === 503) {
-                    // Error de servidor - reintentar
                     await new Promise(resolve => setTimeout(resolve, this.retryDelay));
                     continue;
                 }
 
                 if (attempts === this.retryAttempts) {
-                    // Errores específicos después de todos los intentos
                     if (error.code === 'context_length_exceeded') {
                         return "Tu mensaje es demasiado largo. Por favor, intenta ser más conciso o divide tu consulta en mensajes más cortos.";
                     }
@@ -156,11 +148,9 @@ Fecha actual en Perú: ${new Intl.DateTimeFormat('es-PE', { timeZone: 'America/L
                         return "Lo siento, hay un problema de configuración. Por favor, contacta al administrador.";
                     }
 
-                    // Error genérico después de todos los intentos
                     return "Lo siento, hubo un problema al procesar tu consulta. Por favor, intenta nuevamente en unos momentos.";
                 }
 
-                // Esperar antes del siguiente intento
                 await new Promise(resolve => setTimeout(resolve, this.retryDelay));
             }
         }
@@ -168,7 +158,6 @@ Fecha actual en Perú: ${new Intl.DateTimeFormat('es-PE', { timeZone: 'America/L
 
     async transcribeAudioBuffer(audioBuffer) {
         try {
-            // Crear un archivo temporal
             const tempDir = path.join(__dirname, '../../../temp');
             if (!fs.existsSync(tempDir)) {
                 fs.mkdirSync(tempDir, { recursive: true });
@@ -184,7 +173,6 @@ Fecha actual en Perú: ${new Intl.DateTimeFormat('es-PE', { timeZone: 'America/L
                 model: "whisper-1",
             });
 
-            // Limpiar archivo temporal
             fs.unlinkSync(tempFilePath);
 
             logger.info('Audio transcription completed:', transcription.text);
@@ -196,5 +184,4 @@ Fecha actual en Perú: ${new Intl.DateTimeFormat('es-PE', { timeZone: 'America/L
     }
 }
 
-// Exportar la clase directamente
 module.exports = OpenAIService; 

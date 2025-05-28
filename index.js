@@ -5,10 +5,12 @@ const WhatsAppService = require('./src/infrastructure/whatsapp/whatsappService')
 const { logger } = require('./src/utils/logger');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
-const UserTrackingService = require('./src/application/services/UserTrackingService');
 const MessageHandler = require('./src/application/messageHandler');
 const http = require('http');
 const socketIo = require('socket.io');
+const { testConnection } = require('./src/infrastructure/database/connection');
+const { syncModels } = require('./src/infrastructure/database/models');
+const LeadTrackingService = require('./src/application/services/LeadTrackingService');
 
 // Suprimir warning de punycode
 process.removeAllListeners('warning');
@@ -32,8 +34,9 @@ const io = socketIo(server, {
 app.use(cors());
 app.use(express.json());
 
-const userTrackingService = new UserTrackingService();
 const whatsappService = new WhatsAppService();
+// Crear instancia de LeadTrackingService sin parámetros por ahora
+const leadTrackingService = new LeadTrackingService(null, null);
 let messageHandler = null;
 let qrCodeUrl = null;
 let isWhatsAppReady = false;
@@ -48,27 +51,32 @@ io.on('connection', (socket) => {
         qrCodeUrl: qrCodeUrl
     });
 
-    // Enviar datos iniciales del Excel
-    sendExcelData(socket);
+    // Enviar datos iniciales
+    sendInitialData(socket);
 
     socket.on('disconnect', () => {
         logger.info('Client disconnected');
     });
 });
 
-// Función para enviar datos del Excel
-async function sendExcelData(socket) {
+// Función para enviar datos iniciales
+async function sendInitialData(socket) {
     try {
-        const stats = await userTrackingService.getStats();
-        socket.emit('excel-data', stats);
+        const stats = await leadTrackingService.getStats();
+        socket.emit('stats-data', stats);
     } catch (error) {
-        logger.error('Error sending Excel data:', error);
+        logger.error('Error sending initial data:', error);
     }
 }
 
-// Función para actualizar datos del Excel cada 5 minutos
-setInterval(() => {
-    io.emit('excel-data', userTrackingService.getStats());
+// Función para actualizar datos cada 5 minutos
+setInterval(async () => {
+    try {
+        const stats = await leadTrackingService.getStats();
+        io.emit('stats-data', stats);
+    } catch (error) {
+        logger.error('Error updating stats:', error);
+    }
 }, 5 * 60 * 1000);
 
 // Configuración del cliente WhatsApp
@@ -310,7 +318,7 @@ app.get('/api/whatsapp/status', (req, res) => {
 app.get('/api/stats', async (req, res) => {
     try {
         logger.info('[API] Stats requested');
-        const stats = await userTrackingService.getStats();
+        const stats = await leadTrackingService.getStats();
         res.json({
             ...stats,
             whatsappStatus: isWhatsAppReady
@@ -321,15 +329,15 @@ app.get('/api/stats', async (req, res) => {
     }
 });
 
-// Agregar el evento de mensaje
+// Modificar el evento de mensaje
 client.on('message', async (message) => {
     try {
         logger.info('[WhatsApp] Message received');
         await whatsappService.handleIncomingMessage(message);
         
-        // Actualizar datos del Excel después de cada mensaje
-        const stats = await userTrackingService.getStats();
-        io.emit('excel-data', stats);
+        // Actualizar datos después de cada mensaje
+        const stats = await leadTrackingService.getStats();
+        io.emit('stats-data', stats);
     } catch (error) {
         logger.error('Error handling message:', error);
         try {
@@ -399,8 +407,25 @@ async function cleanup() {
     }
 }
 
-// Iniciar el servidor
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    logger.info(`Server running on port ${PORT}`);
-});
+// Inicializar la base de datos y el servidor
+const initializeApp = async () => {
+  try {
+    // Probar conexión a la base de datos
+    await testConnection();
+    
+    // Sincronizar modelos
+    await syncModels();
+    
+    // Iniciar el servidor
+    const PORT = process.env.PORT || 3000;
+    server.listen(PORT, () => {
+      logger.info(`Server running on port ${PORT}`);
+    });
+  } catch (error) {
+    logger.error('Failed to initialize application:', error);
+    process.exit(1);
+  }
+};
+
+// Iniciar la aplicación
+initializeApp();

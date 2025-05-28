@@ -1,22 +1,23 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const { logger } = require('../../utils/logger');
 const openaiService = require('../openai/openaiService');
 const metaRepository = require('../repositories/MetaRepository');
-const excelService = require('../services/ExcelService');
 const config = require('../config/config');
 const MessageHandler = require('../../application/messageHandler');
+const LeadTrackingService = require('../../application/services/LeadTrackingService');
+const { getCurrentPeruDate, getPeruStartOfDay } = require('../../utils/dateUtils');
 
 class WhatsAppService {
     constructor() {
         this.client = null;
         this.messageHandler = null;
+        this.leadTrackingService = new LeadTrackingService(null, null);
         
-        // Sistema de buffer mejorado
-        this.chatBuffers = new Map(); // Buffer de mensajes por chat
-        this.chatTimers = new Map(); // Timers por chat
-        this.processingChats = new Set(); // Chats siendo procesados
-        this.lastMessageTime = new Map(); // Control de rate limiting
+        // Sistema de bloqueo de chats
+        this.activeChats = new Map(); // Chats actualmente en proceso
+        this.chatLastInteraction = new Map(); // Última interacción por chat
+        this.processingLock = new Map(); // Bloqueo de procesamiento por chat
         
         this.isReady = false;
         this.qrCode = null;
@@ -24,6 +25,8 @@ class WhatsAppService {
         // Configuraciones
         this.MAX_RETRIES = 3;
         this.RATE_LIMIT_DELAY = 2000; // 2 segundos entre mensajes
+        this.CHAT_TIMEOUT = 300000; // 5 minutos de timeout para un chat
+        this.PROCESSING_TIMEOUT = 30000; // 30 segundos máximo de procesamiento
         this.MESSAGE_BUFFER_TIMEOUT = 15000; // 15 segundos de espera para agrupar mensajes
         this.RECONNECT_DELAY = 5000;
         this.MAX_RECONNECT_ATTEMPTS = 5;
@@ -116,68 +119,70 @@ class WhatsAppService {
         const chatId = message.from;
 
         try {
-            // Si ya hay un timer para este chat, cancelarlo
-            if (this.chatTimers.has(chatId)) {
-                clearTimeout(this.chatTimers.get(chatId));
+            // Verificar si el chat está bloqueado
+            if (this.processingLock.get(chatId)) {
+                logger.info(`Chat ${chatId} está siendo procesado, ignorando nuevo mensaje`);
+                return;
             }
 
-            // Si no existe un buffer para este chat, crearlo
-            if (!this.chatBuffers.has(chatId)) {
-                this.chatBuffers.set(chatId, []);
+            // Obtener la fecha actual en Perú
+            const currentDate = getCurrentPeruDate();
+            const startOfDay = getPeruStartOfDay(currentDate);
+            
+            // Verificar si es un nuevo día para este chat
+            const lastInteraction = this.chatLastInteraction.get(chatId);
+            const isNewDay = !lastInteraction || 
+                           getPeruStartOfDay(new Date(lastInteraction)).getTime() < startOfDay.getTime();
+
+            // Si es un nuevo día, resetear el estado del chat
+            if (isNewDay) {
+                this.activeChats.delete(chatId);
+                logger.info(`Nuevo día detectado para chat ${chatId}, reseteando estado`);
             }
 
-            // Agregar mensaje al buffer
-            this.chatBuffers.get(chatId).push(message);
+            // Actualizar última interacción
+            this.chatLastInteraction.set(chatId, currentDate);
 
-            // Configurar nuevo timer
-            const timer = setTimeout(async () => {
-                try {
-                    if (this.processingChats.has(chatId)) {
-                        return; // Ya se está procesando este chat
+            // Establecer bloqueo de procesamiento
+            this.processingLock.set(chatId, true);
+            
+            // Configurar timeout para liberar el bloqueo
+            setTimeout(() => {
+                this.processingLock.delete(chatId);
+            }, this.PROCESSING_TIMEOUT);
+
+            // Procesar el mensaje
+            const response = await this.messageHandler.handleIncomingMessage(message);
+
+            // Si hay respuesta, enviarla
+            if (response) {
+                await this.sendMessage(chatId, response);
+            }
+
+            // Actualizar estado del chat
+            this.activeChats.set(chatId, {
+                lastMessage: currentDate,
+                isActive: true
+            });
+
+            // Programar limpieza del chat después del timeout
+            setTimeout(() => {
+                if (this.activeChats.has(chatId)) {
+                    const chatInfo = this.activeChats.get(chatId);
+                    const timeSinceLastMessage = Date.now() - new Date(chatInfo.lastMessage).getTime();
+                    if (timeSinceLastMessage >= this.CHAT_TIMEOUT) {
+                        this.activeChats.delete(chatId);
+                        logger.info(`Chat ${chatId} cerrado por inactividad`);
                     }
-
-                    this.processingChats.add(chatId);
-                    const messages = this.chatBuffers.get(chatId);
-                    
-                    if (!messages || messages.length === 0) {
-                        this.processingChats.delete(chatId);
-                        return;
-                    }
-
-                    // Usar el último mensaje como base pero combinar los textos
-                    const lastMessage = messages[messages.length - 1];
-                    const combinedText = messages.map(m => m.body).join(' ');
-                    
-                    // Crear una copia del último mensaje
-                    const combinedMessage = Object.assign(Object.create(Object.getPrototypeOf(lastMessage)), lastMessage);
-                    
-                    // Actualizar solo el body con el texto combinado
-                    combinedMessage.body = combinedText;
-
-                    // Procesar el mensaje combinado
-                    const response = await this.messageHandler.handleIncomingMessage(combinedMessage);
-
-                    // Enviar respuesta si existe
-                    if (response) {
-                        await this.sendMessage(chatId, response);
-                        logger.info('Response sent successfully');
-                    }
-
-                    // Limpiar buffer y timers
-                    this.chatBuffers.delete(chatId);
-                    this.chatTimers.delete(chatId);
-                    this.processingChats.delete(chatId);
-                } catch (error) {
-                    logger.error('Error processing buffered messages:', error);
-                    this.processingChats.delete(chatId);
-                    await this.handleError(chatId, error);
                 }
-            }, this.MESSAGE_BUFFER_TIMEOUT);
+            }, this.CHAT_TIMEOUT);
 
-            this.chatTimers.set(chatId, timer);
         } catch (error) {
             logger.error('Error handling incoming message:', error);
             await this.handleError(chatId, error);
+        } finally {
+            // Asegurar que el bloqueo se libere
+            this.processingLock.delete(chatId);
         }
     }
 
