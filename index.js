@@ -111,7 +111,7 @@ client.on('qr', (qr) => {
     
     io.emit('whatsapp-status', {
         isReady: false,
-        qrCodeUrl: `data:image/png;base64,${Buffer.from(qr).toString('base64')}`
+        qrCodeUrl: `data:image/png;base64,${Buffer.from(qr).toString('base64')}` // Formato correcto para qrcode.react
     });
 });
 
