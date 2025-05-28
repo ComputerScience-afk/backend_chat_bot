@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  whatsapp-bot:
+    build: .
+    container_name: whatsapp-bot
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./logs:/usr/src/app/logs
+      - ./data:/usr/src/app/data
+      - ./.wwebjs_auth:/usr/src/app/.wwebjs_auth
+      - ./.wwebjs_cache:/usr/src/app/.wwebjs_cache
+    env_file:
+      - .env
+    # Necesario para que Puppeteer funcione en Docker
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp=unconfined 
