@@ -111,7 +111,7 @@ client.on('qr', (qr) => {
     
     io.emit('whatsapp-status', {
         isReady: false,
-        qrCodeUrl: qrCodeUrl
+        qrCodeUrl: `data:image/png;base64,${Buffer.from(qr).toString('base64')}`
     });
 });
 
